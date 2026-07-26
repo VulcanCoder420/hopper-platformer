@@ -14,7 +14,7 @@ Guide **Hopper** across sky-island stages: run, leap, collect coins, stomp **Bru
 
 ## Live demo
 
-> **Play in the browser:** [https://YOUR-LIVE-DEMO-URL.example](https://YOUR-LIVE-DEMO-URL.example)  
+> **Play in the browser:** [Vercel Deployment](https://hopper-platformer.vercel.app/)  
 
 ---
 
