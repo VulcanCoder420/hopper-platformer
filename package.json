@@ -1,0 +1,22 @@
+{
+  "name": "hopper-platformer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "generate-audio": "node scripts/generate-audio.mjs"
+  },
+  "dependencies": {
+    "howler": "^2.2.4",
+    "three": "^0.172.0"
+  },
+  "devDependencies": {
+    "@types/howler": "^2.2.12",
+    "@types/three": "^0.172.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.6"
+  }
+}
