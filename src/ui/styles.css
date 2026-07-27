@@ -475,6 +475,14 @@
   font-size: 1.35rem;
 }
 
+/* Crouch sits slightly lower so a thumb resting on ◀ ▶ doesn't catch it. */
+.hop-touch-crouch {
+  align-self: flex-end;
+  width: 64px;
+  height: 64px;
+  margin-left: 4px;
+}
+
 .hop-touch-jump {
   width: 96px;
   height: 96px;

@@ -886,13 +886,116 @@ const HURT_POSES: readonly Partial<Pose>[] = [
   },
 ];
 
+/**
+ * Ducked. The hips drop almost to the ankles and the head is pulled down and
+ * forward, so the silhouette shrinks to roughly half height — it has to read as
+ * "fits under that block" at gameplay size, not as a shallow knee bend.
+ * Two frames breathe so a held crouch is not a freeze-frame.
+ */
+const CROUCH_POSES: readonly Partial<Pose>[] = [
+  {
+    hipX: -2,
+    hipY: 104,
+    torsoLean: 0.46,
+    headTilt: -0.3,
+    headX: 3,
+    headY: 13,
+    capTilt: 0.16,
+    armFrontAngle: 0.72,
+    armBackAngle: 0.52,
+    elbowFrontBend: 1.15,
+    elbowBackBend: 1.0,
+    footFrontX: 9,
+    footBackX: -9.5,
+    kneeFrontBend: 5.2,
+    kneeBackBend: 4.6,
+    footFrontPitch: -0.12,
+    squash: 0.94,
+    blink: 0.2,
+    mouthCurve: 1.6,
+    lookX: 0.5,
+    lookY: 0.25,
+  },
+  {
+    hipX: -2,
+    hipY: 106,
+    torsoLean: 0.5,
+    headTilt: -0.27,
+    headX: 3.5,
+    headY: 14.5,
+    capTilt: 0.19,
+    armFrontAngle: 0.66,
+    armBackAngle: 0.46,
+    elbowFrontBend: 1.22,
+    elbowBackBend: 1.06,
+    footFrontX: 9.5,
+    footBackX: -10,
+    kneeFrontBend: 5.4,
+    kneeBackBend: 4.8,
+    footFrontPitch: -0.14,
+    squash: 0.91,
+    blink: 0.32,
+    mouthCurve: 1.4,
+    lookX: 0.5,
+    lookY: 0.28,
+  },
+];
+
+/** Crawl: the same ducked silhouette with the legs shuffling underneath it. */
+const CROUCH_WALK_POSES: readonly Partial<Pose>[] = [
+  {
+    ...CROUCH_POSES[0],
+    footFrontX: 13,
+    footBackX: -12,
+    kneeFrontBend: 5.6,
+    kneeBackBend: 4.2,
+    armFrontAngle: 0.86,
+    armBackAngle: 0.4,
+    hipX: -1,
+  },
+  {
+    ...CROUCH_POSES[1],
+    footFrontX: 6,
+    footFrontY: 109.5,
+    footBackX: -13.5,
+    kneeFrontBend: 6.2,
+    kneeBackBend: 4.4,
+    armFrontAngle: 0.7,
+    armBackAngle: 0.56,
+    hipX: -3,
+  },
+  {
+    ...CROUCH_POSES[0],
+    footFrontX: -2,
+    footBackX: -8,
+    kneeFrontBend: 5.0,
+    kneeBackBend: 5.2,
+    armFrontAngle: 0.5,
+    armBackAngle: 0.72,
+    hipX: -3.5,
+  },
+  {
+    ...CROUCH_POSES[1],
+    footFrontX: 5,
+    footBackX: -14,
+    footBackY: 109.5,
+    kneeFrontBend: 4.6,
+    kneeBackBend: 6.0,
+    armFrontAngle: 0.62,
+    armBackAngle: 0.62,
+    hipX: -2,
+  },
+];
+
 const IDLE_AT = 0;
 const RUN_AT = IDLE_AT + IDLE_FRAMES; // 6
 const JUMP_AT = RUN_AT + RUN_FRAMES; // 14
 const FALL_AT = JUMP_AT + JUMP_POSES.length; // 17
 const LAND_AT = FALL_AT + FALL_POSES.length; // 19
 const HURT_AT = LAND_AT + LAND_POSES.length; // 21
-const TOTAL_FRAMES = HURT_AT + HURT_POSES.length; // 23
+const CROUCH_AT = HURT_AT + HURT_POSES.length; // 23
+const CROUCH_WALK_AT = CROUCH_AT + CROUCH_POSES.length; // 25
+const TOTAL_FRAMES = CROUCH_WALK_AT + CROUCH_WALK_POSES.length; // 29
 
 function keyPose(list: readonly Partial<Pose>[], i: number): Pose {
   return pose(list[clampNum(i, 0, list.length - 1)]);
@@ -904,7 +1007,9 @@ function poseForFrame(frame: number): Pose {
   if (frame < FALL_AT) return keyPose(JUMP_POSES, frame - JUMP_AT);
   if (frame < LAND_AT) return keyPose(FALL_POSES, frame - FALL_AT);
   if (frame < HURT_AT) return keyPose(LAND_POSES, frame - LAND_AT);
-  return keyPose(HURT_POSES, frame - HURT_AT);
+  if (frame < CROUCH_AT) return keyPose(HURT_POSES, frame - HURT_AT);
+  if (frame < CROUCH_WALK_AT) return keyPose(CROUCH_POSES, frame - CROUCH_AT);
+  return keyPose(CROUCH_WALK_POSES, frame - CROUCH_WALK_AT);
 }
 
 // --- Art bundle ------------------------------------------------------------
@@ -919,6 +1024,12 @@ export const HOPPER_CLIPS: ClipMap = {
   fall: { frames: range(FALL_AT, FALL_POSES.length), fps: 8, loop: true },
   land: { frames: range(LAND_AT, LAND_POSES.length), fps: 16, loop: false },
   hurt: { frames: range(HURT_AT, HURT_POSES.length), fps: 10, loop: false },
+  crouch: { frames: range(CROUCH_AT, CROUCH_POSES.length), fps: 4, loop: true },
+  crouchWalk: {
+    frames: range(CROUCH_WALK_AT, CROUCH_WALK_POSES.length),
+    fps: 9,
+    loop: true,
+  },
 };
 
 export function getHopperArt(): CharacterArt {
@@ -988,12 +1099,19 @@ export class HopperSprite {
       vy: number;
       justLanded: boolean;
       justJumped: boolean;
+      crouching?: boolean;
     },
   ): void {
     const speed = Math.abs(opts.vx);
     const clip = this.sprite.clip;
 
-    if (opts.justJumped) {
+    if (opts.crouching) {
+      // Highest priority: while the hitbox is ducked the silhouette must be too,
+      // or the sprite reads as standing inside the block it just squeezed under.
+      this.sprite.play(
+        opts.grounded && speed > 0.3 ? 'crouchWalk' : 'crouch',
+      );
+    } else if (opts.justJumped) {
       this.sprite.play('jump', true);
     } else if (opts.justLanded) {
       this.sprite.play('land', true);
@@ -1046,12 +1164,15 @@ export class HopperSprite {
         ? Math.sin(this.bobPhase) * 0.018
         : Math.sin(this.bobPhase) * 0.012;
 
-    // Run playback rate tracks ground speed: a scaled dt drives the clip clock,
-    // so fast running cycles faster without touching the authored fps.
+    // Locomotion playback rate tracks ground speed: a scaled dt drives the clip
+    // clock, so moving faster cycles faster without touching the authored fps.
+    const active = this.sprite.clip;
     const clockDt =
-      this.sprite.clip === 'run'
+      active === 'run'
         ? dt * clampNum(speed / RUN_REF_SPEED, 0.55, 1.75)
-        : dt;
+        : active === 'crouchWalk'
+          ? dt * clampNum(speed / (RUN_REF_SPEED * 0.42), 0.5, 1.6)
+          : dt;
     this.sprite.update(clockDt);
   }
 

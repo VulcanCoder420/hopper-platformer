@@ -71,6 +71,10 @@ export class Player {
     return this.controller.facing;
   }
 
+  get isCrouching(): boolean {
+    return this.controller.isCrouching;
+  }
+
   get powerState(): PowerState {
     return this.power;
   }
@@ -136,6 +140,7 @@ export class Player {
       vy,
       justLanded: this.justLanded,
       justJumped: this.justJumped,
+      crouching: this.controller.isCrouching,
     });
 
     // Smooth grow / shrink so the pickup reads as a transformation, not a pop.

@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { PRIZE } from '../game/config';
 import type { MultiCoinRules, PlatformDef, PrizeContents, Solid } from '../levels/types';
 import { solidFromTop } from '../levels/Collision';
+import { surfaceMaterial } from '../levels/surfaces';
 
 export type PrizeBlockState = 'active' | 'empty';
 
@@ -51,6 +52,11 @@ export class PrizeBlock {
   private bounceT = 0;
   private hitCooldown = 0;
   private readonly restY: number;
+  /** Local clock — the idle pulse must stop when the world does. */
+  private age = 0;
+  /** Shared cache material shown once spent; never mutated, never disposed here. */
+  private readonly spentMat: THREE.MeshStandardMaterial;
+  private readonly rimMat: THREE.MeshStandardMaterial;
 
   constructor(def: PlatformDef) {
     this.x = def.x;
@@ -69,13 +75,18 @@ export class PrizeBlock {
     this.restY = def.y - this.size * 0.5;
 
     const isQ = def.style === 'question' || this.contents !== 'none';
-    this.faceMat = new THREE.MeshStandardMaterial({
-      color: isQ ? 0xffc107 : 0xc45c3e,
-      roughness: isQ ? 0.45 : 0.78,
-      metalness: isQ ? 0.25 : 0.05,
-      emissive: isQ ? 0xffa000 : 0x000000,
-      emissiveIntensity: isQ ? 0.42 : 0,
-    });
+    // Clone the cached surface material so this block owns its emissive pulse.
+    // The clone shares the texture, so the "?" and the world's other blocks stay
+    // one look — mutating the cache entry directly would bleed across levels.
+    this.faceMat = surfaceMaterial(
+      isQ ? 'question' : 'brick',
+      'top',
+      this.size,
+      this.size,
+    ).clone();
+    this.faceMat.emissive.setHex(isQ ? 0xffa000 : 0x000000);
+    this.faceMat.emissiveIntensity = isQ ? 0.42 : 0;
+    this.spentMat = surfaceMaterial('stone', 'body', this.size, this.size);
 
     this.bodyMesh = new THREE.Mesh(
       new THREE.BoxGeometry(this.size, this.size, Math.min(def.depth ?? this.size, this.size * 1.1)),
@@ -86,53 +97,25 @@ export class PrizeBlock {
     this.bodyMesh.position.set(0, 0, 0);
     this.group.add(this.bodyMesh);
 
-    // "?" glyph plane for active question look
-    if (isQ && this.contents !== 'none') {
-      const glyph = this.makeGlyph();
-      glyph.position.set(0, 0, (def.depth ?? this.size) * 0.52);
-      this.group.add(glyph);
-    }
+    // No separate "?" plane: the question surface texture already carries the
+    // glyph on every face. The old plane was also positioned off `def.depth`
+    // while the body clamps its depth, so it could float clear of the block.
 
     // Rim
+    this.rimMat = new THREE.MeshStandardMaterial({
+      color: isQ ? 0xe65100 : 0x8b3a2a,
+      roughness: 0.7,
+      metalness: 0.1,
+    });
     const rim = new THREE.Mesh(
       new THREE.BoxGeometry(this.size * 1.02, this.size * 0.12, this.size * 1.02),
-      new THREE.MeshStandardMaterial({
-        color: isQ ? 0xe65100 : 0x8b3a2a,
-        roughness: 0.7,
-        metalness: 0.1,
-      }),
+      this.rimMat,
     );
     rim.position.set(0, this.size * 0.4, 0);
     rim.castShadow = true;
     this.group.add(rim);
 
     this.group.position.set(this.x, this.restY, this.z);
-  }
-
-  private makeGlyph(): THREE.Mesh {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-    ctx.clearRect(0, 0, 64, 64);
-    ctx.fillStyle = '#fff8e1';
-    ctx.strokeStyle = '#5d4037';
-    ctx.lineWidth = 3;
-    ctx.font = 'bold 48px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.strokeText('?', 32, 34);
-    ctx.fillText('?', 32, 34);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      transparent: true,
-      depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(this.size * 0.7, this.size * 0.7), mat);
-    mesh.name = 'PrizeGlyph';
-    return mesh;
   }
 
   get object3d(): THREE.Object3D {
@@ -201,17 +184,15 @@ export class PrizeBlock {
 
   private setEmpty(): void {
     this.state = 'empty';
-    this.faceMat.color.setHex(0x8d8d8d);
-    this.faceMat.emissive.setHex(0x000000);
-    this.faceMat.emissiveIntensity = 0;
-    this.faceMat.roughness = 0.9;
-    this.faceMat.metalness = 0.05;
-    // Hide "?" glyph
+    // Swap to the spent look rather than recolouring: the active material carries
+    // the "?" in its texture, which no amount of tinting removes.
+    this.bodyMesh.material = this.spentMat;
     const glyph = this.group.getObjectByName('PrizeGlyph');
     if (glyph) glyph.visible = false;
   }
 
   update(dt: number): void {
+    this.age += dt;
     if (this.hitCooldown > 0) this.hitCooldown = Math.max(0, this.hitCooldown - dt);
 
     if (this.multiWindowLeft > 0 && this.state === 'active') {
@@ -231,22 +212,22 @@ export class PrizeBlock {
       this.group.position.y = this.restY;
     }
 
-    // Idle pulse on active question blocks
+    // Idle pulse on active question blocks, off the local clock so a paused
+    // world holds still instead of pulsing behind the panel.
     if (this.state === 'active' && this.contents !== 'none') {
       this.faceMat.emissiveIntensity =
-        0.35 + Math.sin(performance.now() * 0.006 + this.x) * 0.12;
+        0.35 + Math.sin(this.age * 6 + this.x) * 0.12;
     }
   }
 
   dispose(): void {
     this.group.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) {
-        obj.geometry?.dispose();
-        const m = obj.material;
-        if (Array.isArray(m)) m.forEach((mm) => mm.dispose());
-        else m?.dispose();
-      }
+      if (obj instanceof THREE.Mesh) obj.geometry?.dispose();
     });
+    // Only the per-block clone and the rim material belong to us — cached
+    // surface materials are shared process-wide and disposeSurfaces() owns them.
+    this.faceMat.dispose();
+    this.rimMat.dispose();
     this.group.removeFromParent();
   }
 }

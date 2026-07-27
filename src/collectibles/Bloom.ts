@@ -26,6 +26,7 @@ export class Bloom {
 
   readonly group: THREE.Group;
   private emergeT = 0;
+  private age = 0;
   private readonly emergeFromY: number;
   private readonly targetY: number;
   private readonly body: THREE.Group;
@@ -141,8 +142,9 @@ export class Bloom {
 
     this.group.position.set(this.x, this.y, this.z);
     this.group.scale.x = this.facing;
-    // Gentle bob
-    this.body.position.y = Math.sin(performance.now() * 0.008) * 0.03;
+    // Gentle bob, off the local clock so it freezes with the world.
+    this.age += dt;
+    this.body.position.y = Math.sin(this.age * 8) * 0.03;
   }
 
   private resolveHorizontal(solids: readonly Solid[]): void {

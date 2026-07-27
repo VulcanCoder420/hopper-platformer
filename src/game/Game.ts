@@ -320,14 +320,23 @@ export class Game {
    * Merge level geometry solids with prize-block solids and push to all systems.
    */
   private bindLevelSystems(def: LevelDef): void {
+    this.rebindPrizeSolids(def);
+    this.enemies.spawnFromLevel(def);
+    this.coins.spawnFromLevel(def);
+    this.powerUps.clear();
+  }
+
+  /**
+   * Rebuild prize blocks and re-publish the merged solid list. Prize solids are
+   * recreated with the blocks, so every consumer must be re-pointed at the new
+   * array or it keeps colliding against freed geometry.
+   */
+  private rebindPrizeSolids(def: LevelDef): void {
     const prizeSolids = this.prizes.spawnFromLevel(def);
     this.playSolids = [...this.level.solids, ...prizeSolids];
     this.player.setSolids(this.playSolids);
     this.enemies.setSolids(this.playSolids);
     this.powerUps.setSolids(this.playSolids);
-    this.enemies.spawnFromLevel(def);
-    this.coins.spawnFromLevel(def);
-    this.powerUps.clear();
   }
 
   // --- State machine ---
@@ -441,6 +450,10 @@ export class Game {
     // Re-spawn level enemies so a death doesn't soft-lock empty paths unfairly
     this.enemies.spawnFromLevel(def);
     this.powerUps.clear();
+    // Prize blocks reset too, or a Bloom spent on the attempt that killed you is
+    // gone for good. Coins deliberately stay collected — respawning them would
+    // make dying a way to farm score.
+    this.rebindPrizeSolids(def);
     this.cameraTarget.position.set(def.spawn.x, def.spawn.y + 0.85, 0);
     this.cameraFollow.setTarget(this.cameraTarget);
   }

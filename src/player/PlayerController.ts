@@ -58,11 +58,14 @@ export class PlayerController {
   private solids: readonly Solid[] = [];
   private hooks: PlayerControllerHooks = {};
 
-  /** Mutable so powered form can grow the AABB at runtime. */
+  /** Mutable so powered form / crouch can resize the AABB at runtime. */
   halfW: number = PLAYER.halfWidth;
   height: number = PLAYER.height;
   /** Jump launch speed (raised while powered). */
   jumpSpeed: number = PLAYER.jumpSpeed;
+
+  private powered = false;
+  private crouching = false;
 
   /** True if the head struck a solid from below at any sub-step this frame. */
   hitCeilingThisFrame = false;
@@ -107,10 +110,50 @@ export class PlayerController {
     this.suppressLandOnce = true;
     this.grounded = groundedAtRest;
     this.wasGrounded = groundedAtRest;
+    // A crouch held at the old position must not follow the player to the new one.
+    this.crouching = false;
+    this.applySize();
   }
 
   get isGrounded(): boolean {
     return this.grounded;
+  }
+
+  get isCrouching(): boolean {
+    return this.crouching;
+  }
+
+  /** Full standing height for the current power tier (ignores crouch). */
+  private get standHeight(): number {
+    return PLAYER.height * (this.powered ? PLAYER.poweredHeightScale : 1);
+  }
+
+  /**
+   * True if a box `h` tall at the current position would intersect a solid.
+   * The floor is excluded: its top sits exactly at `y`, and the tiny lift keeps
+   * float error from reading it as a collision.
+   */
+  private blockedAt(h: number, halfW = this.halfW): boolean {
+    const box: Solid = {
+      minX: this.x - halfW,
+      maxX: this.x + halfW,
+      minY: this.y + PLAYER.skin * 0.5,
+      maxY: this.y + h,
+    };
+    for (const s of this.solids) {
+      if (aabbOverlap(box, s)) return true;
+    }
+    return false;
+  }
+
+  /** Recompute the AABB from the power tier and crouch state. Feet stay at y. */
+  private applySize(): void {
+    this.halfW =
+      PLAYER.halfWidth * (this.powered ? PLAYER.poweredHalfWidthScale : 1);
+    this.height = this.crouching
+      ? this.standHeight * PLAYER.crouchHeightScale
+      : this.standHeight;
+    this.jumpSpeed = this.powered ? PLAYER.poweredJumpSpeed : PLAYER.jumpSpeed;
   }
 
   get state(): PlayerControllerState {
@@ -137,17 +180,19 @@ export class PlayerController {
   /**
    * Integrate one frame of movement against the current solid list.
    */
-  /** Apply or clear Super form sizing / jump boost. */
+  /**
+   * Apply or clear Super form sizing / jump boost.
+   *
+   * Growing under a low ceiling would otherwise embed the player in it, so the
+   * bigger form starts out ducked and stands up on its own once there is
+   * headroom (see the crouch resolution in update()).
+   */
   setPowered(powered: boolean): void {
-    if (powered) {
-      this.halfW = PLAYER.halfWidth * PLAYER.poweredHalfWidthScale;
-      this.height = PLAYER.height * PLAYER.poweredHeightScale;
-      this.jumpSpeed = PLAYER.poweredJumpSpeed;
-    } else {
-      this.halfW = PLAYER.halfWidth;
-      this.height = PLAYER.height;
-      this.jumpSpeed = PLAYER.jumpSpeed;
+    this.powered = powered;
+    if (powered && this.blockedAt(this.standHeight, PLAYER.halfWidth * PLAYER.poweredHalfWidthScale)) {
+      this.crouching = true;
     }
+    this.applySize();
   }
 
   update(dt: number, input: Input): void {
@@ -171,6 +216,15 @@ export class PlayerController {
       this.jumpBufferTimer = Math.max(0, this.jumpBufferTimer - dt);
     }
 
+    // --- Crouch ---
+    // Ducking shrinks the box from the head down, so entering a crouch can never
+    // embed the player. Standing back up can, so it only happens with headroom —
+    // which also means a crouch entered under a ceiling persists until the
+    // player crawls out, instead of snapping upright into the geometry.
+    const wantCrouch = input.pressed('down');
+    this.crouching = wantCrouch || this.blockedAt(this.standHeight);
+    this.applySize();
+
     // --- Horizontal intent ---
     const axis = input.axisX;
     if (axis !== 0) {
@@ -178,7 +232,11 @@ export class PlayerController {
     }
 
     const sprint = input.pressed('sprint');
-    const maxSpeed = sprint ? PLAYER.maxSprintSpeed : PLAYER.maxRunSpeed;
+    const maxSpeed = this.crouching
+      ? PLAYER.maxRunSpeed * PLAYER.crouchSpeedScale
+      : sprint
+        ? PLAYER.maxSprintSpeed
+        : PLAYER.maxRunSpeed;
     const targetVx = axis * maxSpeed;
 
     const onGround = this.grounded;

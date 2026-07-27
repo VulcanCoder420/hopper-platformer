@@ -36,6 +36,9 @@ Guide **Hopper** across sky-island stages: run, leap, collect coins, stomp **Bru
 
 - **Snappy platformer feel** — coyote time, jump buffer, variable jump height, asymmetric gravity
 - **20 complete levels** — skill-gated campaign (meadow → sunset → cave → finale), Mario-style pacing without Nintendo IP
+- **Crouch** — duck to squeeze through gaps too low to stand in, and jump straight out of a
+  crouch. You never stand up into a ceiling: the crouch holds until there is headroom, so
+  grabbing a **Bloom** in a tight corridor can't wedge you in the geometry
 - **Prize blocks** — hit from below for coins, multi-coin windows, or **Bloom** power-ups; empty/used state after
 - **Bloom super form** — grow pickup grants taller form + jump boost; first hit depowers instead of killing
 - **Hand-rigged sprite animation** — Hopper is a 23-frame sheet (idle / run / jump / fall / land / hurt)
@@ -96,6 +99,7 @@ npm run preview
 | Action | Desktop | Touch |
 |--------|---------|--------|
 | **Move** | `A` / `D` or `←` / `→` | **◀** **▶** |
+| **Crouch** | `S` / `↓` (crawl through low gaps; you can still jump) | **▼** |
 | **Jump** | `Space` (hold for full height) | **JUMP** |
 | **Sprint** | `Shift` | **RUN** |
 | **Pause** | `Esc` | **❚❚** |

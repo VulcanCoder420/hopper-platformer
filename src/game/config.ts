@@ -57,6 +57,14 @@ export const PLAYER = {
   poweredHalfWidthScale: 1.1,
   poweredJumpSpeed: 14.6,
   poweredVisualScale: 1.22,
+  /**
+   * Crouch (duck). Shrinks the hitbox from the head down — feet stay planted —
+   * so low gaps become passable. Applied on top of the power tier, so a powered
+   * crouch is still shorter than a normal stand.
+   */
+  crouchHeightScale: 0.56,
+  /** Crouch-walk speed as a fraction of the normal run cap. */
+  crouchSpeedScale: 0.42,
 } as const;
 
 /** Bloom power-up (mushroom-like grow item — original name/art). */

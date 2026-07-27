@@ -29,6 +29,7 @@ export class TouchControls {
       <div class="hop-touch-left" aria-label="Move">
         <button type="button" class="hop-touch-btn hop-touch-dir" data-action="left" aria-label="Move left">◀</button>
         <button type="button" class="hop-touch-btn hop-touch-dir" data-action="right" aria-label="Move right">▶</button>
+        <button type="button" class="hop-touch-btn hop-touch-dir hop-touch-crouch" data-action="down" aria-label="Crouch">▼</button>
       </div>
       <div class="hop-touch-right" aria-label="Actions">
         <button type="button" class="hop-touch-btn hop-touch-sprint" data-action="sprint" aria-label="Sprint">RUN</button>
