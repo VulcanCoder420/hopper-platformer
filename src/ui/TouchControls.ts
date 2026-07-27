@@ -6,6 +6,24 @@ export interface TouchControlsOptions {
 }
 
 /**
+ * Every action a pad button may bind to. Derived from `Action` rather than
+ * spelled out at the call site, so adding a button cannot silently no-op on a
+ * stale allowlist.
+ */
+const TOUCH_ACTIONS: readonly Action[] = [
+  'left',
+  'right',
+  'up',
+  'down',
+  'jump',
+  'sprint',
+];
+
+function isTouchAction(value: string | null): value is Action {
+  return value !== null && (TOUCH_ACTIONS as readonly string[]).includes(value);
+}
+
+/**
  * On-screen virtual controls for phones/tablets.
  * Multi-touch safe: left/right + jump can be held together.
  */
@@ -103,8 +121,7 @@ export class TouchControls {
     if (!el) return null;
     if (el.hasAttribute('data-pause')) return 'pause';
     const a = el.getAttribute('data-action');
-    if (a === 'left' || a === 'right' || a === 'jump' || a === 'sprint') return a;
-    return null;
+    return isTouchAction(a) ? a : null;
   }
 
   private onPointerDown = (e: PointerEvent): void => {
@@ -167,11 +184,11 @@ export class TouchControls {
     this.root.querySelectorAll('.hop-touch-btn.is-active').forEach((el) => {
       el.classList.remove('is-active');
     });
-    // Ensure movement/jump not stuck
-    this.input.setAction('left', false);
-    this.input.setAction('right', false);
-    this.input.setAction('jump', false);
-    this.input.setAction('sprint', false);
+    // Belt and braces: clear every bindable action so none can stick held when
+    // the pads hide mid-press (pause, level change, losing the pointer).
+    for (const action of TOUCH_ACTIONS) {
+      this.input.setAction(action, false);
+    }
   }
 
   dispose(): void {
