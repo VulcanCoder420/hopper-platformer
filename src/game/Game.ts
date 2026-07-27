@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CameraFollow } from './CameraFollow';
 import { createScene, type SceneBundle } from './SceneSetup';
 import { Input } from './Input';
-import { COLORS, PLAYER, RENDER } from './config';
+import { COLORS, RENDER } from './config';
 import {
   GameState,
   STARTING_LIVES,
@@ -16,11 +16,12 @@ import { Player } from '../player/Player';
 import { loadLevel, swapLevel, type LoadedLevel } from '../levels/LevelLoader';
 import { disposeSurfaces } from '../levels/surfaces';
 import { disposeAllSheets } from '../render/SpriteSheet';
-import type { LevelDef } from '../levels/types';
-import { level1 } from '../levels/level1';
-import { level2 } from '../levels/level2';
+import type { LevelDef, Solid } from '../levels/types';
+import { ALL_LEVELS } from '../levels/catalog';
 import { EnemyManager } from '../enemies/EnemyManager';
 import { CoinManager } from '../collectibles/CoinManager';
+import { PrizeBlockManager } from '../collectibles/PrizeBlockManager';
+import { PowerUpManager } from '../collectibles/PowerUpManager';
 import { ParticleSystem } from '../fx/Particles';
 import { ScreenShake } from '../fx/ScreenShake';
 import { Juice } from '../fx/Juice';
@@ -46,6 +47,8 @@ export class Game {
   readonly player: Player;
   readonly enemies = new EnemyManager();
   readonly coins = new CoinManager();
+  readonly prizes = new PrizeBlockManager();
+  readonly powerUps = new PowerUpManager();
   readonly particles: ParticleSystem;
   readonly screenShake = new ScreenShake();
   readonly juice: Juice;
@@ -79,8 +82,10 @@ export class Game {
   private worldTime = 0;
 
   private level: LoadedLevel;
-  private readonly levels: LevelDef[] = [level1, level2];
+  private readonly levels: LevelDef[] = ALL_LEVELS;
   private levelIndex = 0;
+  /** Level solids + prize-block solids (player / enemy / bloom collision). */
+  private playSolids: Solid[] = [];
 
   /** Brief invulnerability after a hurt respawn (seconds). */
   private hurtCooldown = 0;
@@ -137,12 +142,12 @@ export class Game {
     this.sceneBundle.scene.add(this.particles.object3d);
     this.juice = new Juice(this.particles, this.screenShake);
 
-    // Load level 1 geometry + solids (coins come from CoinManager)
-    this.level = loadLevel(level1, this.sceneBundle.scene);
+    // Load level 1 geometry + solids (coins / prizes / power-ups are managers)
+    const firstLevel = this.levels[0]!;
+    this.level = loadLevel(firstLevel, this.sceneBundle.scene);
 
-    const spawn = level1.spawn;
+    const spawn = firstLevel.spawn;
     this.player = new Player(spawn.x, spawn.y);
-    this.player.setSolids(this.level.solids);
     this.sceneBundle.scene.add(this.player.object3d);
 
     // Coins
@@ -155,11 +160,39 @@ export class Game {
         this.juice.coinCollect(ev.x, ev.y, ev.z);
       },
     });
-    this.coins.spawnFromLevel(level1);
+
+    // Prize blocks (question / multi-coin / Bloom)
+    this.prizes.setScene(this.sceneBundle.scene);
+    this.prizes.setHooks({
+      onEject: (ev) => {
+        if (this.state !== GameState.Playing) return;
+        if (ev.contents === 'coin') {
+          this.score += 1;
+          this.sfxCoin();
+          this.juice.coinCollect(ev.x, ev.topY + 0.55, ev.z);
+        } else if (ev.contents === 'powerUp') {
+          this.powerUps.spawnBloom(ev.x, ev.topY, ev.z, this.player.facing);
+          this.sfxCoin();
+          this.juice.coinCollect(ev.x, ev.topY + 0.4, ev.z);
+        }
+      },
+    });
+
+    // Bloom power-ups
+    this.powerUps.setScene(this.sceneBundle.scene);
+    this.powerUps.setHooks({
+      onCollect: (ev) => {
+        if (this.state !== GameState.Playing) return;
+        this.player.grantPower();
+        this.score += 5;
+        this.sfxStomp();
+        this.juice.coinCollect(ev.x, ev.y, ev.z);
+        this.screenShake.addTrauma(0.12);
+      },
+    });
 
     // Enemies
     this.enemies.setScene(this.sceneBundle.scene);
-    this.enemies.setSolids(this.level.solids);
     this.enemies.setHooks({
       onStomp: (enemy) => {
         this.sfxStomp();
@@ -167,7 +200,9 @@ export class Game {
       },
       onPlayerHurt: () => this.handlePlayerHurt(),
     });
-    this.enemies.spawnFromLevel(level1);
+
+    // Bind solids + spawns for first level
+    this.bindLevelSystems(firstLevel);
 
     // Audio + juice hooks
     this.player.onJump = () => {
@@ -183,12 +218,20 @@ export class Game {
       const { x, y } = this.player.position;
       this.juice.land(x, y, impactVy);
     };
+    this.player.onCeilingHit = (solid) => {
+      if (this.state !== GameState.Playing) return;
+      let ev = this.prizes.handleCeilingHit(solid);
+      if (!ev) {
+        const headY = this.player.controller.y + this.player.controller.height;
+        ev = this.prizes.tryHitAt(this.player.controller.x, headY);
+      }
+    };
 
     const aspect = container.clientWidth / Math.max(container.clientHeight, 1);
     this.cameraFollow = new CameraFollow(aspect);
     this.cameraTarget.position.set(spawn.x, spawn.y + 0.9, 0);
     this.cameraFollow.setTarget(this.cameraTarget);
-    this.cameraFollow.setBounds({ ...level1.bounds });
+    this.cameraFollow.setBounds({ ...firstLevel.bounds });
 
     // Post-processing: bloom + color grade + vignette (subtle, 60fps-friendly)
     this.postFX = new PostFX(
@@ -270,7 +313,21 @@ export class Game {
   }
 
   get solids() {
-    return this.level.solids;
+    return this.playSolids;
+  }
+
+  /**
+   * Merge level geometry solids with prize-block solids and push to all systems.
+   */
+  private bindLevelSystems(def: LevelDef): void {
+    const prizeSolids = this.prizes.spawnFromLevel(def);
+    this.playSolids = [...this.level.solids, ...prizeSolids];
+    this.player.setSolids(this.playSolids);
+    this.enemies.setSolids(this.playSolids);
+    this.powerUps.setSolids(this.playSolids);
+    this.enemies.spawnFromLevel(def);
+    this.coins.spawnFromLevel(def);
+    this.powerUps.clear();
   }
 
   // --- State machine ---
@@ -293,6 +350,8 @@ export class Game {
     this.hurtCooldown = 0;
     this.stateTimer = 0;
     this.deathPhase = null;
+    this.player.resetPower();
+    this.player.object3d.visible = true;
     this.applyLevel(this.levels[0]!);
     this.state = GameState.Playing;
     this.menu.hide();
@@ -354,13 +413,10 @@ export class Game {
     if (this.level.def.id !== def.id) {
       this.level = swapLevel(this.sceneBundle.scene, this.level, def);
     }
-    this.player.setSolids(this.level.solids);
     this.player.setPosition(def.spawn.x, def.spawn.y);
     this.player.controller.resetMotionState(true);
     this.hurtCooldown = 0;
-    this.enemies.setSolids(this.level.solids);
-    this.enemies.spawnFromLevel(def);
-    this.coins.spawnFromLevel(def);
+    this.bindLevelSystems(def);
     this.screenShake.reset();
     this.cameraFollow.setBounds({ ...def.bounds });
     this.cameraTarget.position.set(def.spawn.x, def.spawn.y + 0.85, 0);
@@ -373,6 +429,7 @@ export class Game {
   /** Respawn at level start (checkpoint/start). Snap camera to avoid lag. */
   private respawnAtStart(): void {
     const def = this.level.def;
+    this.player.resetPower();
     this.player.setPosition(def.spawn.x, def.spawn.y);
     // Clears the jump buffer too — a jump pressed during the death overlay would
     // otherwise fire the instant the player respawns.
@@ -383,16 +440,29 @@ export class Game {
     this.lastShakeY = 0;
     // Re-spawn level enemies so a death doesn't soft-lock empty paths unfairly
     this.enemies.spawnFromLevel(def);
+    this.powerUps.clear();
     this.cameraTarget.position.set(def.spawn.x, def.spawn.y + 0.85, 0);
     this.cameraFollow.setTarget(this.cameraTarget);
   }
 
   /**
-   * Side-hit / hazard / fall: enter Dead state, lose a life.
+   * Side-hit / hazard: Super form drops to normal first; otherwise lose a life.
    */
   private handlePlayerHurt(): void {
     if (this.state !== GameState.Playing) return;
     if (this.hurtCooldown > 0) return;
+
+    // Powered → depower + brief invuln (classic durability fantasy)
+    if (this.player.tryLosePower()) {
+      this.hurtCooldown = 1.2;
+      this.sfxStomp();
+      const { x, y } = this.player.position;
+      this.juice.hurt(x, y + 0.6);
+      this.player.visual.playHurt();
+      this.player.controller.vx *= 0.35;
+      return;
+    }
+
     this.triggerDeath();
   }
 
@@ -400,6 +470,7 @@ export class Game {
     if (this.state !== GameState.Playing) return;
 
     this.lives = Math.max(0, this.lives - 1);
+    this.player.resetPower();
     this.sfxDeath();
     const { x, y } = this.player.position;
     this.juice.hurt(x, y + 0.6);
@@ -499,8 +570,9 @@ export class Game {
     const poleH = goal.height ?? 5.2;
     const px = this.player.controller.x;
     const py = this.player.controller.y;
-    const halfW = PLAYER.halfWidth;
-    const height = PLAYER.height;
+    // Live bounds so Super form height still flags correctly.
+    const halfW = this.player.controller.halfW;
+    const height = this.player.controller.height;
 
     const goalMinX = goal.x - GOAL_HALF_W;
     const goalMaxX = goal.x + GOAL_HALF_W;
@@ -555,6 +627,8 @@ export class Game {
     this.hud.dispose();
     this.enemies.dispose();
     this.coins.dispose();
+    this.prizes.dispose();
+    this.powerUps.dispose();
     this.particles.dispose();
     this.postFX.dispose();
     this.level.dispose();
@@ -644,12 +718,23 @@ export class Game {
     this.worldTime += dt;
     this.player.update(dt, this.input);
 
+    this.prizes.update(dt);
+    this.powerUps.update(dt);
+
     // Coins are awarded before enemy contact can flip the state: a coin touched
     // on the same frame as a death was consumed with no score and never came back.
     this.coins.update(dt, this.worldTime);
     this.coins.collectOverlapping(this.player);
+    this.powerUps.collectOverlapping(this.player);
 
     this.enemies.update(dt);
+
+    if (this.hurtCooldown > 0) {
+      // Blink the powered-drop / respawn invuln frames.
+      this.player.object3d.visible = Math.floor(this.hurtCooldown * 16) % 2 === 0;
+    } else {
+      this.player.object3d.visible = true;
+    }
 
     if (this.hurtCooldown <= 0) {
       this.enemies.resolvePlayer(this.player);

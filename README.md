@@ -35,7 +35,9 @@ Guide **Hopper** across sky-island stages: run, leap, collect coins, stomp **Bru
 ## Features
 
 - **Snappy platformer feel** — coyote time, jump buffer, variable jump height, asymmetric gravity
-- **Two complete levels** — *Meadow Run* (tutorial pacing) and *Ridge Climb* (tighter vertical challenge)
+- **20 complete levels** — skill-gated campaign (meadow → sunset → cave → finale), Mario-style pacing without Nintendo IP
+- **Prize blocks** — hit from below for coins, multi-coin windows, or **Bloom** power-ups; empty/used state after
+- **Bloom super form** — grow pickup grants taller form + jump boost; first hit depowers instead of killing
 - **Hand-rigged sprite animation** — Hopper is a 23-frame sheet (idle / run / jump / fall / land / hurt)
   generated at runtime from a parametric puppet: real knee bend, counter-swinging arms, and a run cycle
   whose playback rate tracks ground speed
@@ -103,12 +105,16 @@ npm run preview
 
 ## Levels
 
-| # | Name | What to expect |
-|---|------|----------------|
-| 1 | **Meadow Run** | Learn the ropes — friendly gaps, coins, first stomps (~1–2 min) |
-| 2 | **Ridge Climb** | Pipes, vertical routes, denser threats — clear the flag to win |
+Twenty stages teach one idea at a time (introduce → practice → expand → test):
 
-**Win:** touch each level’s flag pole. Beat both stages for the victory screen (score, lives, time).
+| # | Name | Focus |
+|---|------|--------|
+| 1–7 | Meadow Gate … Cadence Hills | Jump, pipes, prize blocks, multi-path, **Bloom**, cadence |
+| 8–12 | Ridge Climb … Momentum Run | Vertical routes, stairs, death gaps, flow |
+| 13–17 | Cave Mouth … Pace Break Peak | Theme shift, multi-coin, tall climbs, pace breaks |
+| 18–20 | Sunset Gauntlet … Flag Finale | Gauntlets, master fork, capstone |
+
+**Win:** touch each level’s flag pole. Clear all 20 for the victory screen (score, lives, time).
 
 ---
 

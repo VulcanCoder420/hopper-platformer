@@ -16,6 +16,7 @@ import { solidFromTop } from './Collision';
 import { createParallax, type ParallaxSystem } from './parallax';
 import { createScenery, type ScenerySystem } from './Scenery';
 import { surfaceMaterial } from './surfaces';
+import { PrizeBlockManager } from '../collectibles/PrizeBlockManager';
 
 export interface LoadedLevel {
   def: LevelDef;
@@ -113,6 +114,12 @@ export function loadLevel(def: LevelDef, scene?: THREE.Scene): LoadedLevel {
     const isSolid = p.solid !== false;
     const depth = p.depth ?? depthDefault;
     const z = p.z ?? 0;
+
+    // Interactive prize blocks are meshed + solid'd by PrizeBlockManager so
+    // hit state / empty visuals stay in one place (no double geometry).
+    if (PrizeBlockManager.isOwnedPlatform(p)) {
+      continue;
+    }
 
     if (kind === 'pipe') {
       const built = buildPipe(p, style);

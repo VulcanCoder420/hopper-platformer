@@ -11,6 +11,11 @@ export interface PlayerControllerHooks {
   onLand?: (impactVy: number) => void;
   /** Fired when landing with strong downward velocity (enemy stomp later). */
   onStomp?: (impactVy: number) => void;
+  /**
+   * Fired once per frame when the head hits a solid from below (ceiling).
+   * `solid` is the first ceiling solid contacted this frame.
+   */
+  onCeilingHit?: (solid: Solid) => void;
 }
 
 export interface PlayerControllerState {
@@ -53,8 +58,16 @@ export class PlayerController {
   private solids: readonly Solid[] = [];
   private hooks: PlayerControllerHooks = {};
 
-  readonly halfW = PLAYER.halfWidth;
-  readonly height = PLAYER.height;
+  /** Mutable so powered form can grow the AABB at runtime. */
+  halfW: number = PLAYER.halfWidth;
+  height: number = PLAYER.height;
+  /** Jump launch speed (raised while powered). */
+  jumpSpeed: number = PLAYER.jumpSpeed;
+
+  /** True if the head struck a solid from below at any sub-step this frame. */
+  hitCeilingThisFrame = false;
+  /** First ceiling solid contacted this frame (if any). */
+  ceilingSolid: Solid | null = null;
 
   setSolids(solids: readonly Solid[]): void {
     this.solids = solids;
@@ -124,11 +137,26 @@ export class PlayerController {
   /**
    * Integrate one frame of movement against the current solid list.
    */
+  /** Apply or clear Super form sizing / jump boost. */
+  setPowered(powered: boolean): void {
+    if (powered) {
+      this.halfW = PLAYER.halfWidth * PLAYER.poweredHalfWidthScale;
+      this.height = PLAYER.height * PLAYER.poweredHeightScale;
+      this.jumpSpeed = PLAYER.poweredJumpSpeed;
+    } else {
+      this.halfW = PLAYER.halfWidth;
+      this.height = PLAYER.height;
+      this.jumpSpeed = PLAYER.jumpSpeed;
+    }
+  }
+
   update(dt: number, input: Input): void {
     if (dt <= 0) return;
 
     this.wasGrounded = this.grounded;
     this.jumpStartedThisFrame = false;
+    this.hitCeilingThisFrame = false;
+    this.ceilingSolid = null;
 
     // --- Timers ---
     if (this.grounded) {
@@ -173,7 +201,7 @@ export class PlayerController {
     // --- Jump start (buffer + coyote) ---
     const canJump = this.grounded || this.coyoteTimer > 0;
     if (this.jumpBufferTimer > 0 && canJump) {
-      this.vy = PLAYER.jumpSpeed;
+      this.vy = this.jumpSpeed;
       this.grounded = false;
       this.coyoteTimer = 0;
       this.jumpBufferTimer = 0;
@@ -227,6 +255,10 @@ export class PlayerController {
           this.hooks.onStomp?.(impact);
         }
       }
+    }
+
+    if (this.hitCeilingThisFrame && this.ceilingSolid) {
+      this.hooks.onCeilingHit?.(this.ceilingSolid);
     }
   }
 
@@ -283,7 +315,11 @@ export class PlayerController {
       } else {
         // Hit ceiling
         this.y -= overlapB;
-        if (this.vy > 0) this.vy = 0;
+        if (this.vy > 0) {
+          this.vy = 0;
+          this.hitCeilingThisFrame = true;
+          if (!this.ceilingSolid) this.ceilingSolid = s;
+        }
         this.jumpHeld = false;
       }
       Object.assign(b, this.getBounds());

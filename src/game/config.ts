@@ -49,6 +49,36 @@ export const PLAYER = {
   skin: 0.02,
   /** Downward speed threshold for stomp hook eligibility. */
   stompMinVy: -5.5,
+  /**
+   * Super / powered form (Bloom pickup). Slightly taller hitbox + jump boost;
+   * first hazard hit drops back to normal instead of costing a life.
+   */
+  poweredHeightScale: 1.32,
+  poweredHalfWidthScale: 1.1,
+  poweredJumpSpeed: 14.6,
+  poweredVisualScale: 1.22,
+} as const;
+
+/** Bloom power-up (mushroom-like grow item — original name/art). */
+export const BLOOM = {
+  halfW: 0.28,
+  height: 0.52,
+  emergeDuration: 0.42,
+  slideSpeed: 2.6,
+  gravity: 48,
+  terminal: 22,
+  /** How high the item sits above the block top when fully emerged. */
+  emergeHeight: 0.55,
+} as const;
+
+/** Prize-block hit feedback defaults. */
+export const PRIZE = {
+  bounceDuration: 0.12,
+  bounceHeight: 0.22,
+  multiCoinDefaultDuration: 3.2,
+  multiCoinDefaultMax: 10,
+  /** Ignore re-hits for this long after a successful eject (prevents multi-fire). */
+  hitCooldown: 0.08,
 } as const;
 
 export const CAMERA = {

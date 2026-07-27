@@ -1,4 +1,5 @@
 import type { Input } from '../game/Input';
+import { PLAYER } from '../game/config';
 import {
   PlayerController,
   type PlayerControllerHooks,
@@ -7,6 +8,9 @@ import {
 import { HopperSprite } from './HopperSprite';
 
 export type { Solid, PlayerControllerHooks };
+
+/** Clean-room power tiers — no intermediate damage while Normal. */
+export type PowerState = 'normal' | 'powered';
 
 /**
  * Hopper player: physics controller + stylized mesh + gameplay hooks.
@@ -19,9 +23,13 @@ export class Player {
   onLand?: (impactVy: number) => void;
   onJump?: () => void;
   onStomp?: (impactVy: number) => void;
+  onCeilingHit?: (solid: Solid) => void;
 
   private justLanded = false;
   private justJumped = false;
+  private power: PowerState = 'normal';
+  /** Visual scale lerp toward powered/normal size. */
+  private visualScale = 1;
 
   constructor(x = 0, y = 0) {
     this.controller = new PlayerController();
@@ -40,6 +48,9 @@ export class Player {
       },
       onStomp: (impactVy) => {
         this.onStomp?.(impactVy);
+      },
+      onCeilingHit: (solid) => {
+        this.onCeilingHit?.(solid);
       },
     });
   }
@@ -60,6 +71,14 @@ export class Player {
     return this.controller.facing;
   }
 
+  get powerState(): PowerState {
+    return this.power;
+  }
+
+  get isPowered(): boolean {
+    return this.power === 'powered';
+  }
+
   /**
    * True when falling fast enough that a stomp could register this frame
    * (callers still need an enemy overlap check).
@@ -75,6 +94,31 @@ export class Player {
   setPosition(x: number, y: number): void {
     this.controller.setPosition(x, y);
     this.visual.setPosition(x, y, 0);
+  }
+
+  /** Grant Super form (Bloom pickup). Safe to call when already powered. */
+  grantPower(): void {
+    this.power = 'powered';
+    this.controller.setPowered(true);
+  }
+
+  /**
+   * Drop Super form after a hazard hit. Returns true if power was lost
+   * (caller should NOT kill). Returns false if already normal (caller kills).
+   */
+  tryLosePower(): boolean {
+    if (this.power !== 'powered') return false;
+    this.power = 'normal';
+    this.controller.setPowered(false);
+    return true;
+  }
+
+  /** Full strip on death / level reset. */
+  resetPower(): void {
+    this.power = 'normal';
+    this.controller.setPowered(false);
+    this.visualScale = 1;
+    this.visual.object3d.scale.set(1, 1, 1);
   }
 
   update(dt: number, input: Input): void {
@@ -93,6 +137,11 @@ export class Player {
       justLanded: this.justLanded,
       justJumped: this.justJumped,
     });
+
+    // Smooth grow / shrink so the pickup reads as a transformation, not a pop.
+    const target = this.power === 'powered' ? PLAYER.poweredVisualScale : 1;
+    this.visualScale += (target - this.visualScale) * Math.min(1, 10 * dt);
+    this.visual.object3d.scale.set(this.visualScale, this.visualScale, 1);
   }
 
   /** THREE object to add to the scene. */

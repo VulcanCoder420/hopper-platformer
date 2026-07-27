@@ -22,6 +22,17 @@ export type PlatformStyle =
   | 'pipe'
   | 'wood';
 
+/** What a hit-from-below prize block ejects. Clean-room names (not Nintendo). */
+export type PrizeContents = 'coin' | 'multiCoin' | 'powerUp' | 'none';
+
+/** Multi-coin window: coins keep coming on hits until duration or max is spent. */
+export interface MultiCoinRules {
+  /** Seconds after first hit while further hits still yield coins. */
+  durationSec: number;
+  /** Hard cap on coins ejected from this block. */
+  maxCoins: number;
+}
+
 /**
  * Rectangular platform or block. Position is top-surface center for floating
  * platforms, or box center for solid blocks — LevelLoader interprets by kind.
@@ -44,6 +55,13 @@ export interface PlatformDef {
   solid?: boolean;
   /** Kind influences mesh construction. */
   kind?: 'ground' | 'platform' | 'block' | 'pipe' | 'stair' | 'ledge';
+  /**
+   * Prize contents when hit from below. Question-style blocks default to
+   * `'coin'` when this is omitted; brick/other blocks only prize if set.
+   */
+  contents?: PrizeContents;
+  /** Required when contents is multiCoin (defaults applied by manager if absent). */
+  multiCoin?: MultiCoinRules;
 }
 
 /**
