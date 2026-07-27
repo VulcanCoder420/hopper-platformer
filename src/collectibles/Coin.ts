@@ -37,7 +37,7 @@ export class Coin {
       roughness: 0.32,
       metalness: 0.62,
       emissive: COLORS.coin,
-      emissiveIntensity: 0.48,
+      emissiveIntensity: 0.62,
     });
     this.mesh = new THREE.Mesh(geo, mat);
     // Stand upright like a classic side-view coin (face toward camera-ish)
@@ -84,9 +84,11 @@ export class Coin {
     const bob = Math.sin(elapsed * 2.5 + this.phase) * 0.12;
     this.group.position.y = this.baseY + bob;
 
-    // Subtle pulse on emissive
+    // Pulse across the bloom threshold so the halo breathes. Kept modest on
+    // purpose: pushed higher, the glow swallows the disc and a coin stops
+    // reading as a coin.
     const mat = this.mesh.material as THREE.MeshStandardMaterial;
-    mat.emissiveIntensity = 0.28 + Math.sin(elapsed * 5 + this.phase) * 0.12;
+    mat.emissiveIntensity = 0.62 + Math.sin(elapsed * 5 + this.phase) * 0.16;
   }
 
   /** Mark collected and hide mesh (manager removes from scene). */

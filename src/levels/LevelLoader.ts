@@ -14,6 +14,8 @@ import type {
 } from './types';
 import { solidFromTop } from './Collision';
 import { createParallax, type ParallaxSystem } from './parallax';
+import { createScenery, type ScenerySystem } from './Scenery';
+import { surfaceMaterial } from './surfaces';
 
 export interface LoadedLevel {
   def: LevelDef;
@@ -22,6 +24,10 @@ export interface LoadedLevel {
   coins: THREE.Object3D[];
   goal: THREE.Group;
   parallax: ParallaxSystem;
+  /** Trees, bushes, tufts — wind is driven via scenery.update(elapsed). */
+  scenery: ScenerySystem;
+  /** Flag wave + pole shimmer. Call once per frame with absolute elapsed time. */
+  animateGoal(elapsed: number): void;
   /** Dispose meshes/materials and remove from parent. */
   dispose(): void;
 }
@@ -67,6 +73,25 @@ function boxMesh(
 }
 
 /**
+ * Textured surface box. Texel density is driven by the mesh's own dimensions so
+ * a 16-unit ground strip and a 1-unit block share the same visual scale.
+ */
+function surfaceBox(
+  w: number,
+  h: number,
+  d: number,
+  style: PlatformStyle,
+  face: 'top' | 'body',
+  opts: { cast?: boolean; receive?: boolean; emissive?: number; emissiveIntensity?: number } = {},
+): THREE.Mesh {
+  const material = surfaceMaterial(style, face, w, Math.max(h, d), {
+    emissive: opts.emissive,
+    emissiveIntensity: opts.emissiveIntensity,
+  });
+  return boxMesh(w, h, d, material, opts);
+}
+
+/**
  * Load a level definition into the given scene (or a detached root).
  */
 export function loadLevel(def: LevelDef, scene?: THREE.Scene): LoadedLevel {
@@ -78,20 +103,9 @@ export function loadLevel(def: LevelDef, scene?: THREE.Scene): LoadedLevel {
   const coins: THREE.Object3D[] = [];
   const depthDefault = WORLD.platformDepth * 0.55;
 
-  // Far ground plane for fog continuity
-  const farGround = new THREE.Mesh(
-    new THREE.PlaneGeometry(Math.max(200, def.bounds.maxX - def.bounds.minX + 80), 120),
-    mat(COLORS.hillMid, { roughness: 1, metalness: 0 }),
-  );
-  farGround.rotation.x = -Math.PI / 2;
-  farGround.position.set(
-    (def.bounds.minX + def.bounds.maxX) * 0.5,
-    def.deathY + 0.05,
-    -30,
-  );
-  farGround.receiveShadow = true;
-  farGround.castShadow = false;
-  root.add(farGround);
+  // No far-ground plate: the parallax ridges now cover the horizon completely,
+  // and a lit 200x120 plane behind them showed as a band of lit ground between
+  // the ridgeline and the sky. Pits read as open sky, which suits sky islands.
 
   for (const p of def.platforms) {
     const kind = p.kind ?? 'platform';
@@ -136,7 +150,16 @@ export function loadLevel(def: LevelDef, scene?: THREE.Scene): LoadedLevel {
 
   // Parallax under root (updates with camera X via LoadedLevel.parallax)
   const levelWidth = def.bounds.maxX - def.bounds.minX;
-  const parallax = createParallax(root, levelWidth);
+  const parallax = createParallax(
+    root,
+    levelWidth,
+    (def.bounds.minX + def.bounds.maxX) * 0.5,
+  );
+
+  // Vegetation, placed from the platform list and kept off the gameplay lane.
+  const scenery = createScenery(def, root);
+
+  const animateGoal = makeGoalAnimator(goal);
 
   scene?.add(root);
 
@@ -147,14 +170,22 @@ export function loadLevel(def: LevelDef, scene?: THREE.Scene): LoadedLevel {
     coins,
     goal,
     parallax,
+    scenery,
+    animateGoal,
     dispose() {
       parallax.dispose();
+      scenery.dispose();
       root.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
           obj.geometry?.dispose();
           const m = obj.material;
-          if (Array.isArray(m)) m.forEach((mm) => mm.dispose());
-          else m?.dispose();
+          // Surface materials are shared, process-wide cache entries keyed by
+          // style and tiling — disposing them here would blank out every future
+          // level. disposeSurfaces() owns their teardown.
+          const disposable = (mm: THREE.Material) =>
+            !mm.name.startsWith('Surface_');
+          if (Array.isArray(m)) m.forEach((mm) => disposable(mm) && mm.dispose());
+          else if (m && disposable(m)) m.dispose();
         }
       });
       root.removeFromParent();
@@ -171,7 +202,6 @@ function buildPlatformStrip(
 ): { group: THREE.Group; solids: Solid[] } {
   const group = new THREE.Group();
   group.name = isGround ? 'GroundStrip' : 'Platform';
-  const colors = STYLE_COLORS[style];
   const solids: Solid[] = [];
 
   const topH = isGround ? Math.min(p.h, 0.55) : Math.min(p.h, 0.38);
@@ -180,35 +210,35 @@ function buildPlatformStrip(
   const topCy = topY - topH * 0.5;
   const bodyCy = topY - topH - bodyH * 0.5;
 
-  const top = boxMesh(
-    p.w,
-    topH,
-    depth,
-    mat(colors.top, { roughness: colors.roughness, metalness: colors.metalness }),
-    { cast: !isGround, receive: true },
-  );
+  const top = surfaceBox(p.w, topH, depth, style, 'top', {
+    cast: !isGround,
+    receive: true,
+  });
   top.position.set(p.x, topCy, z);
   group.add(top);
 
-  const body = boxMesh(
+  const body = surfaceBox(
     p.w * (isGround ? 1 : 0.94),
     bodyH,
     depth * (isGround ? 0.96 : 0.9),
-    mat(colors.body, { roughness: 0.92, metalness: 0.02 }),
+    style,
+    'body',
     { cast: !isGround, receive: true },
   );
   body.position.set(p.x, bodyCy, z);
   group.add(body);
 
   if (style === 'grass' || isGround) {
+    // Overhanging sod edge. Inset on both ends and pushed clear of the slab's
+    // front face — sharing a plane with the slab z-fights along the whole strip.
     const lip = boxMesh(
-      p.w,
-      0.14,
-      0.18,
+      p.w - 0.04,
+      0.16,
+      0.22,
       mat(COLORS.grassDark, { roughness: 0.9 }),
       { cast: false, receive: true },
     );
-    lip.position.set(p.x, topY + 0.02, z + depth * 0.5 - 0.06);
+    lip.position.set(p.x, topY + 0.03, z + depth * 0.5 + 0.02);
     group.add(lip);
   }
 
@@ -233,27 +263,14 @@ function buildBlock(
   const cy = p.y - size * 0.5;
 
   const isQ = style === 'question';
-  const material = mat(colors.top, {
-    roughness: colors.roughness,
-    metalness: colors.metalness,
+  // The "?" glyph is painted into the question texture itself, so no separate
+  // coplanar face plane is needed. Emissive is lifted above the bloom threshold.
+  const mesh = surfaceBox(size, size, d, style, 'top', {
     emissive: isQ ? 0xffa000 : 0x000000,
-    emissiveIntensity: isQ ? 0.22 : 0,
+    emissiveIntensity: isQ ? 0.42 : 0,
   });
-
-  const mesh = boxMesh(size, size, d, material);
   mesh.position.set(p.x, cy, z);
   group.add(mesh);
-
-  if (isQ) {
-    // "?" face as a thin raised disc/plane on front
-    const face = new THREE.Mesh(
-      new THREE.PlaneGeometry(size * 0.55, size * 0.55),
-      mat(0xfff8e1, { roughness: 0.5, metalness: 0.1, emissive: 0xffe082, emissiveIntensity: 0.15 }),
-    );
-    face.position.set(p.x, cy, z + d * 0.5 + 0.01);
-    face.castShadow = false;
-    group.add(face);
-  }
 
   // Side bevel strip
   const rim = boxMesh(
@@ -278,7 +295,6 @@ function buildPipe(
 ): { group: THREE.Group; solids: Solid[] } {
   const group = new THREE.Group();
   group.name = 'Pipe';
-  const colors = STYLE_COLORS.pipe;
   const radius = p.w * 0.5;
   const height = p.h;
   // p.y = top lip
@@ -288,8 +304,8 @@ function buildPipe(
   const lipCy = p.y - lipH * 0.5;
   const z = p.z ?? 0;
 
-  const bodyMat = mat(colors.body, { roughness: 0.38, metalness: 0.4 });
-  const lipMat = mat(colors.top, { roughness: 0.35, metalness: 0.45 });
+  const bodyMat = surfaceMaterial('pipe', 'body', radius * 2, bodyH);
+  const lipMat = surfaceMaterial('pipe', 'top', radius * 2, lipH);
 
   const body = new THREE.Mesh(
     new THREE.CylinderGeometry(radius * 0.92, radius * 0.95, bodyH, 20),
@@ -331,7 +347,6 @@ function buildStair(
 ): { group: THREE.Group; solids: Solid[] } {
   const group = new THREE.Group();
   group.name = 'Stair';
-  const colors = STYLE_COLORS[style];
   const solids: Solid[] = [];
   // Stair rises to the right: each step is 1 unit wide, total height p.h
   const steps = Math.max(2, Math.round(p.w));
@@ -342,14 +357,12 @@ function buildStair(
     const sh = stepH * (i + 1);
     const sx = p.x - p.w * 0.5 + stepW * (i + 0.5);
     const topY = p.y - p.h + sh;
-    const mesh = boxMesh(
+    const mesh = surfaceBox(
       stepW * 0.98,
       sh,
       depth,
-      mat(i % 2 === 0 ? colors.top : colors.body, {
-        roughness: colors.roughness,
-        metalness: colors.metalness,
-      }),
+      style,
+      i % 2 === 0 ? 'top' : 'body',
     );
     mesh.position.set(sx, topY - sh * 0.5, z);
     group.add(mesh);
@@ -384,37 +397,51 @@ function buildGoal(goal: LevelDef['goal']): THREE.Group {
       roughness: 0.28,
       metalness: 0.75,
       emissive: 0xffc107,
-      emissiveIntensity: 0.55,
+      emissiveIntensity: 0.85,
     }),
   );
   ball.position.set(goal.x, baseY + poleH + 0.15, 0);
   ball.castShadow = true;
   group.add(ball);
 
-  // Flag (emissive for subtle bloom pick-up)
+  // Flag. The geometry is offset so the mesh origin sits at the pole, which lets
+  // it wave about its attachment point instead of swinging around its middle.
+  const flagGeo = new THREE.PlaneGeometry(1.7, 1.05, 14, 5);
+  flagGeo.translate(0.85, 0, 0);
   const flag = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.7, 1.05),
+    flagGeo,
     new THREE.MeshStandardMaterial({
       color: 0xff5252,
       side: THREE.DoubleSide,
       roughness: 0.6,
       metalness: 0.08,
       emissive: 0xc62828,
-      emissiveIntensity: 0.28,
+      emissiveIntensity: 0.62,
     }),
   );
-  flag.position.set(goal.x + 0.9, baseY + poleH - 0.7, 0);
+  flag.position.set(goal.x, baseY + poleH - 0.7, 0);
   flag.castShadow = true;
   flag.name = 'Flag';
   group.add(flag);
 
-  // Accent stripe
+  // Stripe is a child of the flag so it inherits the wave and can never be
+  // bisected by it (the old sibling at z+0.01 was sliced in half every cycle).
+  const stripeGeo = new THREE.PlaneGeometry(1.7, 0.18, 14, 1);
+  stripeGeo.translate(0.85, 0, 0);
   const stripe = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.7, 0.18),
-    mat(0xffe066, { roughness: 0.5, metalness: 0.1, emissive: 0xffc107, emissiveIntensity: 0.2 }),
+    stripeGeo,
+    new THREE.MeshStandardMaterial({
+      color: 0xffe066,
+      side: THREE.DoubleSide,
+      roughness: 0.5,
+      metalness: 0.1,
+      emissive: 0xffc107,
+      emissiveIntensity: 0.4,
+    }),
   );
-  stripe.position.set(goal.x + 0.9, baseY + poleH - 0.7, 0.01);
-  group.add(stripe);
+  stripe.position.z = 0.014;
+  stripe.name = 'FlagStripe';
+  flag.add(stripe);
 
   // Base block
   const base = boxMesh(
@@ -427,6 +454,46 @@ function buildGoal(goal: LevelDef['goal']): THREE.Group {
   group.add(base);
 
   return group;
+}
+
+/**
+ * Per-frame cloth wave for the goal flag, amplitude growing with distance from
+ * the pole. 90 vertices for the flag plus its stripe — negligible cost, and it is
+ * the most-looked-at piece of polish in the level.
+ */
+function makeGoalAnimator(goal: THREE.Group): (elapsed: number) => void {
+  const flag = goal.getObjectByName('Flag');
+  if (!(flag instanceof THREE.Mesh)) return () => {};
+
+  const waved: THREE.Mesh[] = [flag];
+  const stripe = flag.getObjectByName('FlagStripe');
+  if (stripe instanceof THREE.Mesh) waved.push(stripe);
+
+  // Cache the flat X/Y so the wave is recomputed from rest each frame rather
+  // than accumulating drift.
+  const rest = waved.map((m) => {
+    const pos = m.geometry.getAttribute('position') as THREE.BufferAttribute;
+    return { mesh: m, pos, x: Float32Array.from(pos.array as Float32Array) };
+  });
+
+  return (elapsed: number) => {
+    for (const entry of rest) {
+      const { pos, x: base } = entry;
+      for (let i = 0; i < pos.count; i++) {
+        const px = base[i * 3]!;
+        const py = base[i * 3 + 1]!;
+        // px is 0 at the pole and 1.7 at the free edge.
+        const t = px / 1.7;
+        pos.setZ(
+          i,
+          Math.sin(px * 3.1 - elapsed * 6.2 + py * 0.8) * 0.09 * t +
+            Math.sin(px * 6.4 - elapsed * 9.1) * 0.03 * t,
+        );
+      }
+      pos.needsUpdate = true;
+      entry.mesh.geometry.computeVertexNormals();
+    }
+  };
 }
 
 /** Convenience: unload previous and load next. */

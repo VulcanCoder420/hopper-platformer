@@ -25,6 +25,28 @@ interface Particle {
 
 export type BurstKind = 'coinSparkle' | 'enemyDeath' | 'jumpDust' | 'landDust' | 'landImpact';
 
+/** Soft round spark. Without a map, THREE.Points draws hard squares. */
+function makeSparkTexture(): THREE.Texture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const r = size * 0.5;
+    const g = ctx.createRadialGradient(r, r, 0, r, r, r);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.35, 'rgba(255,255,255,0.72)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /**
  * Pooled GPU-friendly particle system using a single THREE.Points.
  * Supports coin sparkles, enemy death puffs, jump/landing dust.
@@ -73,9 +95,13 @@ export class ParticleSystem {
     this.geometry = new THREE.BufferGeometry();
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
     this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+    this.geometry.setAttribute('aSize', new THREE.BufferAttribute(this.sizes, 1));
 
     this.material = new THREE.PointsMaterial({
-      size: 0.22,
+      // Base size stays at 1 so the per-particle aSize attribute below is the
+      // real world size. PointsMaterial.size alone is uniform across the pool.
+      size: 1,
+      map: makeSparkTexture(),
       vertexColors: true,
       transparent: true,
       opacity: 0.92,
@@ -83,6 +109,15 @@ export class ParticleSystem {
       sizeAttenuation: true,
       blending: THREE.AdditiveBlending,
     });
+
+    this.material.onBeforeCompile = (shader) => {
+      shader.vertexShader =
+        'attribute float aSize;\n' +
+        shader.vertexShader.replace(
+          'gl_PointSize = size;',
+          'gl_PointSize = size * aSize;',
+        );
+    };
 
     this.object3d = new THREE.Points(this.geometry, this.material);
     this.object3d.name = 'Particles';
@@ -329,7 +364,6 @@ export class ParticleSystem {
       this.colors[i * 3 + 2] = p.b;
       this.sizes[i] = p.size * fade;
 
-      // Approximate per-particle size via color brightness fade (PointsMaterial is uniform size)
       // Dim color as life ends for soft dissolve
       const dim = 0.35 + 0.65 * fade;
       this.colors[i * 3] *= dim;
@@ -341,25 +375,9 @@ export class ParticleSystem {
 
     this.activeCount = active;
 
-    const posAttr = this.geometry.getAttribute('position') as THREE.BufferAttribute;
-    const colAttr = this.geometry.getAttribute('color') as THREE.BufferAttribute;
-    posAttr.needsUpdate = true;
-    colAttr.needsUpdate = true;
-
-    // Drive material size from average active particle size for a bit of scale feel
-    if (active > 0) {
-      let sum = 0;
-      let n = 0;
-      for (let i = 0; i < this.sizes.length; i++) {
-        if (this.sizes[i]! > 0) {
-          sum += this.sizes[i]!;
-          n++;
-        }
-      }
-      if (n > 0) {
-        this.material.size = Math.min(0.45, Math.max(0.12, (sum / n) * 1.4));
-      }
-    }
+    this.geometry.getAttribute('position').needsUpdate = true;
+    this.geometry.getAttribute('color').needsUpdate = true;
+    this.geometry.getAttribute('aSize').needsUpdate = true;
   }
 
   private acquire(): Particle | null {
@@ -383,6 +401,7 @@ export class ParticleSystem {
 
   dispose(): void {
     this.geometry.dispose();
+    this.material.map?.dispose();
     this.material.dispose();
     this.object3d.removeFromParent();
   }

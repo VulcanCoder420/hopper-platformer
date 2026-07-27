@@ -39,6 +39,14 @@ export class PlayerController {
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
   private jumpHeld = false;
+  /**
+   * True on the frame a jump launches. A release edge from *before* the launch
+   * (the button was tapped mid-air and the jump came out of the buffer) must not
+   * cut the jump it never applied to.
+   */
+  private jumpStartedThisFrame = false;
+  /** Swallow one land hook after a teleport so respawns don't thud. */
+  private suppressLandOnce = false;
   /** Velocity at the moment of last ground contact (for land/stomp hooks). */
   private landImpactVy = 0;
 
@@ -59,6 +67,33 @@ export class PlayerController {
   setPosition(x: number, y: number): void {
     this.x = x;
     this.y = y;
+    // A teleport is not a landing, and timers from the old position are stale.
+    this.coyoteTimer = 0;
+    this.jumpBufferTimer = 0;
+    this.jumpHeld = false;
+    this.landImpactVy = 0;
+    this.suppressLandOnce = true;
+  }
+
+  /**
+   * Full reset for a respawn or level load: clears velocity and every transient
+   * timer so a buffered jump can't fire on the first frame at the new spawn.
+   *
+   * `groundedAtRest` seeds the grounded flag — pass true when the destination is
+   * a spawn point resting on a solid, so the rising-edge land hook stays quiet
+   * and the player can jump immediately.
+   */
+  resetMotionState(groundedAtRest = false): void {
+    this.vx = 0;
+    this.vy = 0;
+    this.coyoteTimer = 0;
+    this.jumpBufferTimer = 0;
+    this.jumpHeld = false;
+    this.jumpStartedThisFrame = false;
+    this.landImpactVy = 0;
+    this.suppressLandOnce = true;
+    this.grounded = groundedAtRest;
+    this.wasGrounded = groundedAtRest;
   }
 
   get isGrounded(): boolean {
@@ -93,6 +128,7 @@ export class PlayerController {
     if (dt <= 0) return;
 
     this.wasGrounded = this.grounded;
+    this.jumpStartedThisFrame = false;
 
     // --- Timers ---
     if (this.grounded) {
@@ -142,17 +178,21 @@ export class PlayerController {
       this.coyoteTimer = 0;
       this.jumpBufferTimer = 0;
       this.jumpHeld = true;
+      this.jumpStartedThisFrame = true;
+      // Leaving the ground under our own power — a real landing must be heard.
+      this.suppressLandOnce = false;
       this.hooks.onJump?.();
     }
 
-    // Variable jump: release cuts upward velocity
-    if (this.jumpHeld) {
-      if (input.justReleased('jump') || !input.pressed('jump')) {
-        if (this.vy > 0) {
-          this.vy *= PLAYER.jumpCutMultiplier;
-        }
-        this.jumpHeld = false;
+    // Variable jump: a release *after* launch cuts upward velocity.
+    // Only an actual release edge counts. Testing `!pressed` instead would
+    // retroactively apply a pre-launch release to a buffered jump and cut it to
+    // 40% on its very first frame, turning a 2.9u jump into a 0.4u stumble.
+    if (this.jumpHeld && !this.jumpStartedThisFrame && input.justReleased('jump')) {
+      if (this.vy > 0) {
+        this.vy *= PLAYER.jumpCutMultiplier;
       }
+      this.jumpHeld = false;
     }
     if (!input.pressed('jump')) {
       this.jumpHeld = false;
@@ -178,10 +218,14 @@ export class PlayerController {
 
     // Land / stomp hooks (rising edge of grounded)
     if (this.grounded && !this.wasGrounded) {
-      const impact = this.landImpactVy;
-      this.hooks.onLand?.(impact);
-      if (impact <= PLAYER.stompMinVy) {
-        this.hooks.onStomp?.(impact);
+      if (this.suppressLandOnce) {
+        this.suppressLandOnce = false;
+      } else {
+        const impact = this.landImpactVy;
+        this.hooks.onLand?.(impact);
+        if (impact <= PLAYER.stompMinVy) {
+          this.hooks.onStomp?.(impact);
+        }
       }
     }
   }

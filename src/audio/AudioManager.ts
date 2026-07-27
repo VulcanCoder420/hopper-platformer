@@ -306,6 +306,22 @@ export class AudioManager {
     return this.musicId;
   }
 
+  /**
+   * Flip the loop flag on the track that is already playing, without restarting
+   * it. Howler only honours this while the sound is still active, so callers
+   * must check isMusicPlaying() and fall back to a fresh playMusic() if not.
+   */
+  setMusicLoop(loop: boolean): void {
+    if (!this.musicId) return;
+    const howl = this.howls.get(this.musicId);
+    if (!howl) return;
+    try {
+      howl.loop(loop);
+    } catch {
+      // ignore
+    }
+  }
+
   isMusicPlaying(): boolean {
     if (!this.musicId) return false;
     const howl = this.howls.get(this.musicId);

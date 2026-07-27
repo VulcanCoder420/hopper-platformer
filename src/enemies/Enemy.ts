@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import type { Solid } from '../levels/types';
 import { solidFromCenter } from '../levels/Collision';
+import {
+  spriteFromArt,
+  type AnimatedSprite,
+  type CharacterArt,
+} from '../render/SpriteSheet';
 
 export type EnemyKind = 'bruiser' | 'skimmer';
 
@@ -34,9 +39,13 @@ export abstract class Enemy {
   readonly deathDuration = 0.38;
 
   readonly group: THREE.Group;
-  protected readonly bodyRoot: THREE.Group;
+  /** Animated sprite body — created by the subclass via setBody(). */
+  protected sprite: AnimatedSprite | null = null;
+  /** Clip played while alive. Subclasses set it ('walk', 'fly', …). */
+  protected moveClip = 'walk';
   protected walkPhase = 0;
   protected squash = 1;
+  private deathClipStarted = false;
 
   constructor(
     kind: EnemyKind,
@@ -53,9 +62,17 @@ export abstract class Enemy {
 
     this.group = new THREE.Group();
     this.group.name = `Enemy_${kind}`;
-    this.bodyRoot = new THREE.Group();
-    this.group.add(this.bodyRoot);
     this.group.position.set(x, y, 0);
+  }
+
+  /**
+   * Attach the animated sprite body. Feet sit at the group origin, which is the
+   * bottom of the collision AABB.
+   */
+  protected setBody(art: CharacterArt, initialClip: string): void {
+    this.sprite = spriteFromArt(art, initialClip, { castShadow: true });
+    this.moveClip = initialClip;
+    this.group.add(this.sprite.object3d);
   }
 
   get object3d(): THREE.Object3D {
@@ -109,7 +126,7 @@ export abstract class Enemy {
     this.vx = 0;
     this.vy = 0;
     this.deathTimer = this.deathDuration;
-    this.squash = 0.35;
+    // The squash is authored in the death clip's frames — no scale hack needed.
   }
 
   setPosition(x: number, y: number): void {
@@ -134,47 +151,43 @@ export abstract class Enemy {
 
   protected tickDeath(dt: number): void {
     this.deathTimer = Math.max(0, this.deathTimer - dt);
-    // Squash flat and sink slightly
+    const sprite = this.sprite;
+    if (!sprite) return;
+
+    if (!this.deathClipStarted) {
+      sprite.play('squash', true);
+      sprite.setDeform(1);
+      this.deathClipStarted = true;
+    }
+    sprite.update(dt);
+
+    // Dissolve over the back half of the hold. setOpacity flips the material to
+    // blended mode and flags a recompile, which the old scale-based fade skipped
+    // — leaving the corpse fully opaque until it popped out of existence.
     const t = 1 - this.deathTimer / this.deathDuration;
-    const sy = Math.max(0.08, 0.35 * (1 - t) + 0.08);
-    const sxz = 1.35 + t * 0.4;
-    this.bodyRoot.scale.set(sxz * this.facing, sy, sxz);
-    this.bodyRoot.position.y = (1 - sy) * this.height * 0.15;
-    // Fade-ish via opacity if materials support it
     if (t > 0.55) {
-      this.group.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          const mat = obj.material as THREE.MeshStandardMaterial;
-          if (mat && 'opacity' in mat) {
-            mat.transparent = true;
-            mat.opacity = Math.max(0, 1 - (t - 0.55) / 0.45);
-          }
-        }
-      });
+      sprite.setOpacity(1 - (t - 0.55) / 0.45);
     }
   }
 
   protected syncMesh(dt: number): void {
     this.group.position.set(this.x, this.y, 0);
-    // Bob / walk juice
+    const sprite = this.sprite;
+    if (!sprite) return;
+
     this.walkPhase += dt * (6 + Math.abs(this.vx) * 0.8);
-    const bob = Math.sin(this.walkPhase) * 0.03;
     this.squash += (1 - this.squash) * Math.min(1, 8 * dt);
-    const sy = this.squash;
-    const sxz = 1 / Math.sqrt(Math.max(sy, 0.5));
-    this.bodyRoot.scale.set(sxz * this.facing, sy, sxz);
-    this.bodyRoot.position.y = bob + (1 - sy) * 0.2;
+    sprite.setFacing(this.facing);
+    // Feet-anchored geometry: scaling about y=0 keeps them planted, so unlike the
+    // old mesh body this needs no vertical compensation.
+    sprite.setDeform(this.squash);
+    sprite.play(this.moveClip);
+    sprite.update(dt);
   }
 
   dispose(): void {
-    this.group.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) {
-        obj.geometry?.dispose();
-        const mat = obj.material;
-        if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-        else mat?.dispose();
-      }
-    });
+    this.sprite?.dispose();
+    this.sprite = null;
     this.group.removeFromParent();
   }
 }

@@ -36,10 +36,18 @@ Guide **Hopper** across sky-island stages: run, leap, collect coins, stomp **Bru
 
 - **Snappy platformer feel** — coyote time, jump buffer, variable jump height, asymmetric gravity
 - **Two complete levels** — *Meadow Run* (tutorial pacing) and *Ridge Climb* (tighter vertical challenge)
-- **Enemies** — ground **Bruisers** (patrol + stomp) and flying **Skimmers**
+- **Hand-rigged sprite animation** — Hopper is a 23-frame sheet (idle / run / jump / fall / land / hurt)
+  generated at runtime from a parametric puppet: real knee bend, counter-swinging arms, and a run cycle
+  whose playback rate tracks ground speed
+- **Enemies** — ground **Bruisers** (patrol + stomp) and flying **Skimmers**, each with their own
+  animated sheet and a stomp-squash death clip
 - **Collectibles & score** — spinning coins, lives, level clear → victory summary
-- **2.5D visuals** — three.js lighting, real-time shadows, parallax skies, soft bloom & vignette
-- **Juice** — particles, screen shake, squash-and-stretch, landing dust
+- **2.5D visuals** — three.js lighting, alpha-cutout silhouette shadows, extruded ridgeline parallax
+  with atmospheric perspective, drifting clouds, soft bloom & vignette, MSAA
+- **A world that grows** — low-poly trees, bushes, grass tufts, flowers and rocks, wind-swayed with
+  per-instance phase, placed deterministically from the level data
+- **Procedural everything** — every texture, sprite and sound is generated in code. No binary art assets.
+- **Juice** — particles, screen shake, squash-and-stretch, landing dust, a real cloth wave on the goal flag
 - **Full audio** — looping BGM + SFX (jump, land, coin, stomp, death, flag) via Howler
 - **Desktop + mobile** — keyboard or multi-touch on-screen pads (move + jump together)
 - **Zero-friction toolchain** — `npm install && npm run dev`
@@ -128,11 +136,12 @@ For a deeper technical write-up (architecture, juice systems, fact sheet), see *
 src/
   audio/          Howler manager + sound registry
   collectibles/   Coins
-  enemies/        Bruiser, Skimmer
+  enemies/        Bruiser, Skimmer + their procedural sprite art
   fx/             Particles, shake, juice, post-FX
-  game/           Loop, input, camera, config, states
-  levels/         Level defs, loader, collision, parallax
-  player/         Controller + mesh (squash / stretch)
+  game/           Loop, input, camera, config, states, scene/lighting
+  levels/         Level defs, loader, collision, parallax, scenery, surface textures
+  player/         Controller + animated sprite (rig, clips, squash / stretch)
+  render/         Sprite-sheet engine + Canvas2D painting toolkit
   ui/             HUD, menus, touch controls, styles
 public/assets/audio/   Music + SFX
 ```

@@ -75,13 +75,19 @@ export const CAMERA = {
 
 export const RENDER = {
   shadowMapSize: 2048,
-  toneMappingExposure: 1.08,
-  fogNear: 30,
-  fogFar: 100,
-  /** Post-FX bloom (UnrealBloomPass) — keep subtle for 60fps. */
-  bloomStrength: 0.28,
-  bloomRadius: 0.35,
-  bloomThreshold: 0.82,
+  /** Sun is bright enough that ACES needs headroom — keep exposure under 1. */
+  toneMappingExposure: 0.95,
+  /** Long, shallow fog ramp: aerial perspective on the play plane, backdrop
+   *  layers washed most of the way into `COLORS.fog` by the far end. */
+  fogNear: 8,
+  fogFar: 95,
+  /** Post-FX bloom (UnrealBloomPass) — wide and soft, not a tight halo. */
+  bloomStrength: 0.38,
+  bloomRadius: 0.6,
+  /** Linear-luma cut, measured on the pre-tonemap HDR buffer. */
+  bloomThreshold: 0.55,
+  /** Luma ramp above the threshold so emissives fade in instead of popping. */
+  bloomSmoothWidth: 0.08,
 } as const;
 
 /** Vibrant stylized palette — original, not Mario-branded. */
@@ -89,10 +95,12 @@ export const COLORS = {
   skyTop: 0x1a4f9c,
   skyHorizon: 0x7ec8f5,
   skyBottom: 0xc8e8ff,
-  fog: 0x8ec8e8,
+  /** Exactly skyHorizon so backdrop layers dissolve into the sky, not past it. */
+  fog: 0x7ec8f5,
   ambient: 0xb8d0f0,
   hemiSky: 0x9ec8ff,
-  hemiGround: 0x6a9a4a,
+  /** Warm dirt bounce for undersides — a green ground term made them glow. */
+  hemiGround: 0x7a6a4a,
   sun: 0xfff0d0,
   accentWarm: 0xffb060,
   grass: 0x4caf50,
@@ -104,9 +112,11 @@ export const COLORS = {
   playerBody: 0xff6b4a,
   playerAccent: 0xffe066,
   playerEyes: 0x1a1a2e,
-  hillNear: 0x3d8b5a,
-  hillMid: 0x2d6b4a,
-  hillFar: 0x1e4a5a,
+  /** Backdrop ridges: hillNear, then 30% / 60% mixed toward skyHorizon so the
+   *  layers already sit where the fog ramp is taking them. */
+  hillNear: 0x4f9a68,
+  hillMid: 0x5da892,
+  hillFar: 0x6bb6bd,
   platformAccent: 0xf4a261,
   coin: 0xffd54f,
 } as const;

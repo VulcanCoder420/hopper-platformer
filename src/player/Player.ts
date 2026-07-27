@@ -4,7 +4,7 @@ import {
   type PlayerControllerHooks,
   type Solid,
 } from './PlayerController';
-import { PlayerVisual } from './PlayerVisual';
+import { HopperSprite } from './HopperSprite';
 
 export type { Solid, PlayerControllerHooks };
 
@@ -13,7 +13,7 @@ export type { Solid, PlayerControllerHooks };
  */
 export class Player {
   readonly controller: PlayerController;
-  readonly visual: PlayerVisual;
+  readonly visual: HopperSprite;
 
   /** External hooks (audio / VFX / combat later). */
   onLand?: (impactVy: number) => void;
@@ -26,7 +26,7 @@ export class Player {
   constructor(x = 0, y = 0) {
     this.controller = new PlayerController();
     this.controller.setPosition(x, y);
-    this.visual = new PlayerVisual();
+    this.visual = new HopperSprite();
     this.visual.setPosition(x, y, 0);
 
     this.controller.setHooks({

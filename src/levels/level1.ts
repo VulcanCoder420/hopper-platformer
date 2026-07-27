@@ -31,14 +31,17 @@ export const level1: LevelDef = {
     // First easy floating platform
     { kind: 'platform', style: 'stone', x: 16, y: 1.5, w: 3.4, h: 0.9, depth: 2.6 },
 
-    // Question block above platform (solid — can stand / bonk)
-    { kind: 'block', style: 'question', x: 16, y: 3.4, w: 0.95, h: 0.95, depth: 0.95 },
+    // Question block above platform (solid — can stand / bonk).
+    // Underside must clear platformTop + PLAYER.height (1.5 + 1.28) or the block
+    // becomes an invisible chest-height wall across the platform.
+    { kind: 'block', style: 'question', x: 16, y: 4.0, w: 0.95, h: 0.95, depth: 0.95 },
 
     // Ground continues after small gap (~2.5u — easy walk/jump)
     { kind: 'ground', style: 'grass', x: 24, y: 0, w: 10, h: 1.8, depth: 6 },
 
-    // Mid floating path
-    { kind: 'platform', style: 'brick', x: 28, y: 2.0, w: 2.8, h: 0.85, depth: 2.4 },
+    // Mid floating path — y clears the ground island below by more than the
+    // player's height so the last stretch of that island stays walkable.
+    { kind: 'platform', style: 'brick', x: 28, y: 2.6, w: 2.8, h: 0.85, depth: 2.4 },
     { kind: 'platform', style: 'stone', x: 32.5, y: 2.8, w: 2.4, h: 0.85, depth: 2.2 },
 
     // Ground island
@@ -76,7 +79,7 @@ export const level1: LevelDef = {
     { x: 15.2, y: 2.3 },
     { x: 16, y: 2.3 },
     { x: 16.8, y: 2.3 },
-    { x: 16, y: 4.2 },
+    { x: 16, y: 4.85 },
     // Arc over first gap
     { x: 19.5, y: 1.8 },
     { x: 21, y: 1.5 },
@@ -106,13 +109,14 @@ export const level1: LevelDef = {
     { x: 51.5, y: 2.8 },
     { x: 53.5, y: 2.5 },
     { x: 55.5, y: 2.2 },
-    // Pipe hop + final ground
+    // Pipe hop + final ground. Every coin must sit left of the flag: touching the
+    // pole ends the level, so anything past x≈63.9 can never be picked up.
     { x: 57.5, y: 3.0 },
-    { x: 59, y: 1.4 },
-    { x: 60.5, y: 1.4 },
-    { x: 62, y: 1.4 },
-    { x: 63.5, y: 1.4 },
-    { x: 65, y: 1.4 },
+    { x: 58.8, y: 1.4 },
+    { x: 60.0, y: 1.4 },
+    { x: 61.2, y: 1.4 },
+    { x: 62.4, y: 1.4 },
+    { x: 63.4, y: 1.4 },
   ],
 
   enemies: [

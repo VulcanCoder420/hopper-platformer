@@ -36,9 +36,11 @@ export const level2: LevelDef = {
     { kind: 'platform', style: 'stone', x: 28.0, y: 3.5, w: 2.0, h: 0.8, depth: 2.0 },
     { kind: 'platform', style: 'metal', x: 32.0, y: 4.6, w: 2.4, h: 0.75, depth: 2.2 },
 
-    // Question block ceiling-ish bonk target on high path
-    { kind: 'block', style: 'question', x: 32.0, y: 6.5, w: 0.95, h: 0.95, depth: 0.95 },
-    { kind: 'block', style: 'question', x: 33.1, y: 6.5, w: 0.95, h: 0.95, depth: 0.95 },
+    // Question block ceiling-ish bonk target on high path. Underside must clear
+    // the metal platform top (4.6) by more than PLAYER.height (1.28), or most of
+    // that platform turns into an invisible wall.
+    { kind: 'block', style: 'question', x: 32.0, y: 7.1, w: 0.95, h: 0.95, depth: 0.95 },
+    { kind: 'block', style: 'question', x: 33.1, y: 7.1, w: 0.95, h: 0.95, depth: 0.95 },
 
     // Drop to mid ground with pit risk on both sides
     { kind: 'ground', style: 'dirt', x: 38, y: 0, w: 6, h: 1.9, depth: 6 },
@@ -103,8 +105,8 @@ export const level2: LevelDef = {
     { x: 30.0, y: 5.0 },
     { x: 32.0, y: 5.5 },
     // Question blocks overhead
-    { x: 32.0, y: 7.4 },
-    { x: 33.1, y: 7.4 },
+    { x: 32.0, y: 8.0 },
+    { x: 33.1, y: 8.0 },
     // Mid ground island
     { x: 37, y: 1.3 },
     { x: 38.5, y: 1.3 },
@@ -138,11 +140,11 @@ export const level2: LevelDef = {
     { x: 90.2, y: 5.0 },
     { x: 93.5, y: 2.9 },
     { x: 96, y: 2.2 },
-    // Final approach
-    { x: 98, y: 1.5 },
+    // Final approach — all left of the flag at x=100, which ends the level on touch.
+    { x: 97.0, y: 1.5 },
+    { x: 97.9, y: 1.5 },
+    { x: 98.8, y: 1.5 },
     { x: 99.5, y: 1.5 },
-    { x: 101, y: 1.5 },
-    { x: 102.5, y: 1.5 },
   ],
 
   enemies: [

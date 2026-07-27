@@ -14,6 +14,8 @@ import { audioManager } from '../audio/AudioManager';
 import { clamp } from '../utils/math';
 import { Player } from '../player/Player';
 import { loadLevel, swapLevel, type LoadedLevel } from '../levels/LevelLoader';
+import { disposeSurfaces } from '../levels/surfaces';
+import { disposeAllSheets } from '../render/SpriteSheet';
 import type { LevelDef } from '../levels/types';
 import { level1 } from '../levels/level1';
 import { level2 } from '../levels/level2';
@@ -63,9 +65,18 @@ export class Game {
   private readonly clock = new THREE.Clock();
   private running = false;
   private rafId = 0;
+  /**
+   * Presentation clock for things that animate even behind a pause panel
+   * (the flag flutter). Always advances.
+   */
   private elapsed = 0;
   /** Accumulated play time while Playing (for HUD / victory). */
   private playTime = 0;
+  /**
+   * Clock for world animation that must stop when the world stops (coin bob).
+   * Advances only on frames where the world is actually being simulated.
+   */
+  private worldTime = 0;
 
   private level: LoadedLevel;
   private readonly levels: LevelDef[] = [level1, level2];
@@ -103,8 +114,10 @@ export class Game {
   constructor(container: HTMLElement) {
     this.container = container;
 
+    // No `antialias` here: everything is composited through PostFX's offscreen
+    // targets, which carry their own MSAA — the default framebuffer's samples
+    // would be paid for and then never drawn to.
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
       powerPreference: 'high-performance',
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -188,6 +201,7 @@ export class Game {
         bloomStrength: RENDER.bloomStrength,
         bloomRadius: RENDER.bloomRadius,
         bloomThreshold: RENDER.bloomThreshold,
+        bloomSmoothWidth: RENDER.bloomSmoothWidth,
       },
     );
 
@@ -335,11 +349,14 @@ export class Game {
   }
 
   private applyLevel(def: LevelDef): void {
-    this.level = swapLevel(this.sceneBundle.scene, this.level, def);
+    // Rebuilding the same level tears down and re-uploads every mesh for nothing
+    // (Start on the title screen, and Quit→Start, both land here on level 1).
+    if (this.level.def.id !== def.id) {
+      this.level = swapLevel(this.sceneBundle.scene, this.level, def);
+    }
     this.player.setSolids(this.level.solids);
     this.player.setPosition(def.spawn.x, def.spawn.y);
-    this.player.controller.vx = 0;
-    this.player.controller.vy = 0;
+    this.player.controller.resetMotionState(true);
     this.hurtCooldown = 0;
     this.enemies.setSolids(this.level.solids);
     this.enemies.spawnFromLevel(def);
@@ -357,8 +374,9 @@ export class Game {
   private respawnAtStart(): void {
     const def = this.level.def;
     this.player.setPosition(def.spawn.x, def.spawn.y);
-    this.player.controller.vx = 0;
-    this.player.controller.vy = 0;
+    // Clears the jump buffer too — a jump pressed during the death overlay would
+    // otherwise fire the instant the player respawns.
+    this.player.controller.resetMotionState(true);
     this.hurtCooldown = 1.15;
     this.screenShake.reset();
     this.lastShakeX = 0;
@@ -385,6 +403,7 @@ export class Game {
     this.sfxDeath();
     const { x, y } = this.player.position;
     this.juice.hurt(x, y + 0.6);
+    this.player.visual.playHurt();
 
     this.player.controller.vx = 0;
     this.player.controller.vy = 0;
@@ -448,8 +467,19 @@ export class Game {
         timeSeconds: this.playTime,
         levelsCleared: this.levels.length,
       });
-      audioManager.stopMusic();
-      audioManager.playMusic('musicWin', true);
+      // The level-complete fanfare is already playing as a one-shot. Just flip it
+      // to looping instead of restarting it, which was audibly re-triggering the
+      // track two seconds in. Fall back to a fresh play if it already finished
+      // (or never started, e.g. autoplay blocked) so Victory is never silent.
+      if (
+        audioManager.getCurrentMusicId() === 'musicWin' &&
+        audioManager.isMusicPlaying()
+      ) {
+        audioManager.setMusicLoop(true);
+      } else {
+        audioManager.stopMusic();
+        audioManager.playMusic('musicWin', true);
+      }
       return;
     }
 
@@ -529,6 +559,9 @@ export class Game {
     this.postFX.dispose();
     this.level.dispose();
     this.player.dispose();
+    // Process-wide art caches, deliberately outlived by every level swap.
+    disposeSurfaces();
+    disposeAllSheets();
     audioManager.unload();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -575,7 +608,8 @@ export class Game {
           this.returnToMenu();
         }
       }
-      this.updatePresentation(dt, false);
+      // The death puff must keep playing out across the overlay hold.
+      this.updatePresentation(dt, false, true);
       return;
     }
 
@@ -584,17 +618,20 @@ export class Game {
       if (this.stateTimer <= 0) {
         this.finishLevelComplete();
       }
-      this.updatePresentation(dt, false);
+      this.updatePresentation(dt, false, true);
       return;
     }
 
-    if (
-      this.state === GameState.Menu ||
-      this.state === GameState.Paused ||
-      this.state === GameState.Win
-    ) {
-      // Frozen physics — gentle flag flutter + camera presentation only
-      this.updatePresentation(dt, false);
+    if (this.state === GameState.Menu) {
+      // Idle backdrop — coins spin and particles live so the title screen breathes.
+      this.updatePresentation(dt, false, true);
+      return;
+    }
+
+    if (this.state === GameState.Paused || this.state === GameState.Win) {
+      // Genuinely frozen: no particle sim, no coin bob. Only the flag flutters,
+      // which runs off `elapsed` and is deliberately always alive.
+      this.updatePresentation(dt, false, false);
       return;
     }
 
@@ -604,16 +641,19 @@ export class Game {
     }
 
     this.playTime += dt;
+    this.worldTime += dt;
     this.player.update(dt, this.input);
+
+    // Coins are awarded before enemy contact can flip the state: a coin touched
+    // on the same frame as a death was consumed with no score and never came back.
+    this.coins.update(dt, this.worldTime);
+    this.coins.collectOverlapping(this.player);
 
     this.enemies.update(dt);
 
     if (this.hurtCooldown <= 0) {
       this.enemies.resolvePlayer(this.player);
     }
-
-    this.coins.update(dt, this.elapsed);
-    this.coins.collectOverlapping(this.player);
 
     this.particles.update(dt);
 
@@ -640,7 +680,10 @@ export class Game {
       this.player.controller.vy = 0;
       // triggerDeath owns juice / sfx (avoid double burst)
       this.triggerDeath();
-      this.updatePresentation(dt, true);
+      // animateWorld false on all three exits: coins and particles already
+      // stepped once above, and stepping them again here double-speeds them on
+      // every transition frame.
+      this.updatePresentation(dt, true, false);
       this.syncHud();
       return;
     }
@@ -648,20 +691,27 @@ export class Game {
     // Flag / goal touch (only while playing; state guard inside trigger)
     if (this.touchesGoal()) {
       this.triggerLevelComplete();
-      this.updatePresentation(dt, true);
+      this.updatePresentation(dt, true, false);
       this.syncHud();
       return;
     }
 
-    this.updatePresentation(dt, true);
+    this.updatePresentation(dt, true, false);
     this.syncHud();
   }
 
   /**
    * Camera, parallax, accent lights, flag flutter.
-   * When `full` is false, skip follow target updates that depend on live play.
+   *
+   * `followPlayer` false skips follow-target updates that depend on live play.
+   * `animateWorld` true steps coins and particles here — callers on the Playing
+   * path have already stepped them and must pass false.
    */
-  private updatePresentation(dt: number, followPlayer: boolean): void {
+  private updatePresentation(
+    dt: number,
+    followPlayer: boolean,
+    animateWorld: boolean,
+  ): void {
     if (followPlayer) {
       const { x, y } = this.player.position;
       this.cameraTarget.position.set(x, y + 0.85, 0);
@@ -680,16 +730,22 @@ export class Game {
     this.cameraFollow.camera.position.x += this.lastShakeX;
     this.cameraFollow.camera.position.y += this.lastShakeY;
 
-    this.level.parallax.update(this.cameraFollow.camera.position.x);
+    // Keep the sky dome centred on the camera so its gradient never drifts, and
+    // feed elapsed to the parallax so the cloud bands actually drift.
+    this.sceneBundle.updateSky(this.cameraFollow.camera);
+    this.level.parallax.update(
+      this.cameraFollow.camera.position.x,
+      this.elapsed,
+    );
 
-    const flag = this.level.goal.getObjectByName('Flag');
-    if (flag) {
-      flag.rotation.y = Math.sin(this.elapsed * 2.2) * 0.12;
-    }
+    // Flag cloth wave and vegetation wind run off `elapsed`, so they stay alive
+    // behind menus and the pause panel.
+    this.level.animateGoal(this.elapsed);
+    this.level.scenery.update(this.elapsed);
 
-    // Coins still bob gently on menus if desired — only when playing or frozen view
-    if (this.state !== GameState.Playing) {
-      this.coins.update(dt, this.elapsed);
+    if (animateWorld) {
+      this.worldTime += dt;
+      this.coins.update(dt, this.worldTime);
       this.particles.update(dt);
     }
 

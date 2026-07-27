@@ -152,13 +152,10 @@ export class EnemyManager {
         const killed = enemy.hurt(1);
         if (killed) {
           result.stomped += 1;
-          // Bounce player up
+          // Bounce player up. No position snap: enemies are never in the solids
+          // list and a corpse is skipped above, so there is nothing to separate
+          // from — snapping only teleported the player into overhead geometry.
           player.controller.vy = this.stompBounceVy;
-          // Ensure not stuck inside corpse
-          const top = eBounds.maxY;
-          if (player.controller.y < top) {
-            player.controller.y = top;
-          }
           this.hooks.onStomp?.(enemy);
           player.onStomp?.(pVy);
         }
